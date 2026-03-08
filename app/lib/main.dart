@@ -1,6 +1,6 @@
-import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
+import 'package:flutter/material.dart'; // library for UI components
+import 'package:firebase_core/firebase_core.dart'; // Firebase core initialization
+import 'firebase_options.dart'; // Firebase configuration
 
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -9,9 +9,11 @@ import 'bed_board_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
   runApp(const MyApp());
 }
 
@@ -21,7 +23,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Hospital Optimization System',
+      title: 'BedBoard Live Hospital Optimization System',
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.indigo,
@@ -41,14 +43,22 @@ class AuthGate extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snap) {
+
         if (snap.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
           );
         }
+
         final user = snap.data;
-        if (user == null) return const LoginScreen();
-        // signed in → show realtime bed board
+
+        if (user == null) {
+          return const LoginScreen();
+        }
+
+        // User signed in
         return const BedBoardScreen();
       },
     );

@@ -1,9 +1,13 @@
+
+//handle login, logout , registration
+//TALK TO FIREBASE AUTHENTICATION SERVICE
+
 import 'package:firebase_auth/firebase_auth.dart';
 
 class AuthService {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance; //kept the _auth private to prevent misuse from other files
 
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
+  Stream<User?> get authStateChanges => _auth.authStateChanges();  //Firebase’s authentication stream to reactively control navigation
 
   Future<void> signOut() async => _auth.signOut();
 
@@ -15,3 +19,4 @@ class AuthService {
     return _auth.createUserWithEmailAndPassword(email: email, password: password);
   }
 }
+

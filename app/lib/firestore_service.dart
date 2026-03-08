@@ -1,3 +1,6 @@
+
+//file for data management
+//middleman between app and firestore database - like a service layer
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'models.dart';
@@ -5,32 +8,38 @@ import 'models.dart';
 class FirestoreService {
   final _db = FirebaseFirestore.instance;
 
-  // --- Streams ---
-  Stream<List<Ward>> watchWards() => _db.collection('wards')
-    .snapshots()
-    .map((s) => s.docs.map((d) => Ward.fromMap(d.id, d.data())).toList());
+  // Streams - live pipe of data-  no refresh needed, automatic stream updates
+  Stream<List<Ward>> watchWards() => _db
+      .collection('wards')
+      .snapshots()
+      .map((s) => s.docs.map((d) => Ward.fromMap(d.id, d.data())).toList());
 
-  Stream<List<Bed>> watchBedsForWard(String wardId) => _db.collection('beds')
-    .where('wardId', isEqualTo: wardId)
-    .snapshots()
-    .map((s) => s.docs.map((d) => Bed.fromMap(d.id, d.data())).toList());
+  //to filter bed data per ward in realtime
+  Stream<List<Bed>> watchBedsForWard(String wardId) => _db
+      .collection('beds')
+      .where('wardId', isEqualTo: wardId)
+      .snapshots() //listen to real time changes
+      .map((s) => s.docs.map((d) => Bed.fromMap(d.id, d.data())).toList());
 
-  Stream<List<Bed>> watchAllBeds() => _db.collection('beds')
-    .snapshots()
-    .map((s) => s.docs.map((d) => Bed.fromMap(d.id, d.data())).toList());
+  //future use- to make admin dashboard,, wide metrics
+  Stream<List<Bed>> watchAllBeds() => _db
+      .collection('beds')
+      .snapshots()
+      .map((s) => s.docs.map((d) => Bed.fromMap(d.id, d.data())).toList());
 
-  // --- Mutations ---
+  // Mutations
   Future<void> seedSample() async {
-    // idempotent-ish: only seed if empty
+    // idempotent-ish only seed if empty, if data exists, do nothing, no duplicates
     final wardsSnap = await _db.collection('wards').limit(1).get();
     if (wardsSnap.docs.isNotEmpty) return;
 
     final edRef = _db.collection('wards').doc();
     final surgRef = _db.collection('wards').doc();
 
-    await edRef.set({'name': 'ED Blue', 'capacity': 6});
+    await edRef.set({'name': 'ED Majors-1', 'capacity': 6});
     await surgRef.set({'name': 'Surgical A', 'capacity': 6});
 
+    //adding beds to ward using for loop to genrate the bed codes like M1-01
     Future<void> addBeds(String wardId, String prefix) async {
       for (var i = 1; i <= 6; i++) {
         final bedRef = _db.collection('beds').doc();
@@ -49,32 +58,96 @@ class FirestoreService {
   Future<void> updateBedStatus({
     required String bedId,
     required BedStatus status,
-    String? patientAnonId,
+    String? hospitalNumber,
+    Map<String, dynamic>? additionalData,
   }) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    final bedRef = _db.collection('beds').doc(bedId);
-    final bedSnap = await bedRef.get();
-    final bed = Bed.fromMap(bedSnap.id, bedSnap.data()!);
 
-    // write bed change
-    await bedRef.update({
+    final user = FirebaseAuth.instance.currentUser;
+
+    //data-integreity - no duplicates
+    if (status == BedStatus.occupied && hospitalNumber != null) {
+
+      final existing = await _db
+          .collection('beds')
+          .where('hospitalNumber', isEqualTo: hospitalNumber)
+          .where('status', isEqualTo: 'occupied')
+          .get();
+
+      //  if this hospital number exist
+      if (existing.docs.any((doc) => doc.id != bedId)) {
+        throw Exception('Hospital number already assigned to another bed');
+      }
+    }
+
+    await _db.collection('beds').doc(bedId).update({
       'status': bedStatusToString(status),
-      'currentPatientAnonId': patientAnonId,
+      'hospitalNumber': hospitalNumber,
+      'updatedBy': user?.email,
+      'updatedAt': FieldValue.serverTimestamp(),
     });
 
-    // append event
     await _db.collection('occupancy_events').add({
-      'timestamp': FieldValue.serverTimestamp(),
       'bedId': bedId,
-      'wardId': bed.wardId,
-      'action': status == BedStatus.occupied
-          ? 'allocate'
-          : status == BedStatus.cleaning
-            ? 'mark_cleaning'
-            : status == BedStatus.free
-              ? 'discharge'
-              : 'maintenance',
-      'actorUid': uid,
+      'status': bedStatusToString(status),
+      'hospitalNumber': hospitalNumber,
+      'updatedBy': user?.email,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> transferPatientToWard({
+    required String sourceBedId,
+    required String destinationBedId,
+    required String hospitalNumber,
+  }) async {
+
+    final user = FirebaseAuth.instance.currentUser;
+    final db = FirebaseFirestore.instance;
+
+    await db.runTransaction((transaction) async {
+
+      final sourceRef = db.collection('beds').doc(sourceBedId);
+      final destRef = db.collection('beds').doc(destinationBedId);
+
+      final sourceSnap = await transaction.get(sourceRef);
+      final destSnap = await transaction.get(destRef);
+
+      if (!destSnap.exists) {
+        throw Exception("Destination bed does not exist");
+      }
+
+      if (destSnap['status'] != 'free') {
+        throw Exception("Destination bed not free");
+      }
+
+      // free source bed
+      transaction.update(sourceRef, {
+        'status': 'free',
+        'hospitalNumber': null,
+        'updatedBy': user?.email,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // occupy destination bed
+      transaction.update(destRef, {
+        'status': 'occupied',
+        'hospitalNumber': hospitalNumber,
+        'updatedBy': user?.email,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // log transfer event
+      final eventRef = db.collection('occupancy_events').doc();
+      transaction.set(eventRef, {
+        'type': 'transfer',
+        'fromBed': sourceBedId,
+        'toBed': destinationBedId,
+        'hospitalNumber': hospitalNumber,
+        'performedBy': user?.email,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
     });
   }
 }
+
