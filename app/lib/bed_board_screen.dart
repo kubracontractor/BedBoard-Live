@@ -12,6 +12,7 @@ import 'features/porter_dialog.dart';
 import 'models.dart';
 import 'firestore_service.dart';
 import 'userService.dart';
+import 'UserGuide.dart';
 
 class BedBoardScreen extends StatefulWidget {
   const BedBoardScreen({super.key});
@@ -120,10 +121,13 @@ class _BedBoardScreenState extends State<BedBoardScreen> {
                       : 'Ward Details',
                 ),
 
+               
+
                 //BACK BUTTON (only on ward screen)
                 leading: selectedWardId != null
                     ? IconButton(
                         icon: const Icon(Icons.arrow_back),
+                         tooltip: 'Back to Overview',
                         //label: const Text('Back to Overview'),
                         onPressed: () {
                           setState(() {
@@ -135,6 +139,13 @@ class _BedBoardScreenState extends State<BedBoardScreen> {
 
                 //TOP-RIGHT LOGOUT (ONLY on overview)
                 actions: [
+                  IconButton(
+                      icon: const Icon(Icons.info_outline),
+                      tooltip: 'User Guide',
+                      onPressed: () {
+                        showUserGuide(context);
+                      },
+                    ),
                   if (selectedWardId == null)
                     Padding(
                       padding: const EdgeInsets.only(right: 16),
@@ -146,6 +157,8 @@ class _BedBoardScreenState extends State<BedBoardScreen> {
                             onPressed: () async {
                               await FirebaseAuth.instance.signOut();
                             },
+                            //tooltip: 'User Guide',
+                            
                             icon: const Icon(Icons.logout, color: Colors.blue),
                             label: const Text(
                               'Logout',
@@ -808,9 +821,8 @@ Widget _buildOverviewScreen(List<Ward> wards) {
                                   height: 18,
                                   child: Text(
                                     (b.status == BedStatus.occupied ||
-                                                b.status ==
-                                                    BedStatus.awaiting_test) &&
-                                            b.hospitalNumber != null
+                                                b.status == BedStatus.awaiting_test || b.status == BedStatus.cleaning) &&
+                                            b.hospitalNumber != null 
                                         ? 'Patient: ${b.hospitalNumber}'
                                         : '',
                                     style: const TextStyle(fontSize: 12),
@@ -870,8 +882,10 @@ Widget _buildOverviewScreen(List<Ward> wards) {
                 Navigator.pop(context);
 
                 //if the card is purple(awaiting_test) should not ask the hospitalNuber
-                if (bed.status == BedStatus.awaiting_test &&
-                    bed.hospitalNumber != null) {
+                if ((bed.status == BedStatus.awaiting_test ||
+                      bed.status == BedStatus.cleaning) &&
+                    bed.hospitalNumber != null) 
+                    {
                   await _fs.updateBedStatus(
                     bedId: bed.id,
                     status: BedStatus.occupied,
